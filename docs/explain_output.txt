@@ -1,0 +1,77 @@
+BEGIN
+ acting_as 
+-----------
+ admin
+(1 row)
+
+INSERT 0 3000
+INSERT 0 60000
+INSERT 0 20000
+ANALYZE
+ANALYZE
+ANALYZE
+
+=== QUERY 1: service history of ONE motorcycle (used on the motorcycle page) ===
+--- 1a. WITHOUT any helpful index: expect Seq Scan on job_orders ---
+    (idx_job_orders_service_date is dropped too, otherwise the planner
+     could walk that index and filter, which hides the problem)
+DROP INDEX
+DROP INDEX
+                                             QUERY PLAN                                             
+----------------------------------------------------------------------------------------------------
+ Limit  (cost=1551.61..1551.62 rows=5 width=88) (actual rows=5 loops=1)
+   ->  Sort  (cost=1551.61..1551.66 rows=20 width=88) (actual rows=5 loops=1)
+         Sort Key: service_date DESC
+         Sort Method: top-N heapsort  Memory: 25kB
+         ->  Seq Scan on job_orders  (cost=0.00..1551.28 rows=20 width=88) (actual rows=20 loops=1)
+               Filter: (motorcycle_id = 11)
+               Rows Removed by Filter: 60002
+ Planning Time: 0.129 ms
+ Execution Time: 3.480 ms
+(9 rows)
+
+--- 1b. WITH the composite index (motorcycle_id, service_date): expect Index Scan ---
+CREATE INDEX
+ANALYZE
+                                                                QUERY PLAN                                                                 
+-------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.29..21.35 rows=5 width=87) (actual rows=5 loops=1)
+   ->  Index Scan Backward using idx_job_orders_motorcycle_date on job_orders  (cost=0.29..84.53 rows=20 width=87) (actual rows=5 loops=1)
+         Index Cond: (motorcycle_id = 11)
+ Planning Time: 0.128 ms
+ Execution Time: 0.035 ms
+(5 rows)
+
+
+=== QUERY 2: low stock parts (used on the dashboard) ===
+--- 2a. WITHOUT the partial index: expect Seq Scan on parts ---
+DROP INDEX
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Sort  (cost=901.88..918.56 rows=6671 width=19) (actual rows=42 loops=1)
+   Sort Key: name
+   Sort Method: quicksort  Memory: 26kB
+   ->  Seq Scan on parts  (cost=0.00..478.15 rows=6671 width=19) (actual rows=42 loops=1)
+         Filter: (stock_qty <= reorder_level)
+         Rows Removed by Filter: 19970
+ Planning Time: 0.092 ms
+ Execution Time: 1.418 ms
+(8 rows)
+
+--- 2b. WITH the partial index (only low stock rows are in it): expect Bitmap/Index Scan ---
+CREATE INDEX
+ANALYZE
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=745.14..761.81 rows=6671 width=19) (actual rows=42 loops=1)
+   Sort Key: name
+   Sort Method: quicksort  Memory: 26kB
+   ->  Bitmap Heap Scan on parts  (cost=10.02..321.41 rows=6671 width=19) (actual rows=42 loops=1)
+         Recheck Cond: (stock_qty <= reorder_level)
+         Heap Blocks: exact=41
+         ->  Bitmap Index Scan on idx_parts_low_stock  (cost=0.00..8.35 rows=6671 width=0) (actual rows=42 loops=1)
+ Planning Time: 0.080 ms
+ Execution Time: 0.075 ms
+(9 rows)
+
+ROLLBACK

@@ -1,0 +1,65 @@
+=== shop_readonly: can read business data ===
+SET
+ customers 
+-----------
+         8
+(1 row)
+
+--- ...but cannot write (expect: permission denied) ---
+ERROR:  permission denied for table customers
+--- ...cannot read the password column (expect: permission denied) ---
+ERROR:  permission denied for table users
+--- ...can read non-sensitive user columns ---
+ id |     name      |          email           
+----+---------------+--------------------------
+  1 | Shop Admin    | admin@motorshop.test
+  2 | Tonyo Alvarez | mechanic1@motorshop.test
+  3 | Ben Castillo  | mechanic2@motorshop.test
+(3 rows)
+
+RESET
+
+=== shop_app: can read and write data but cannot change structure ===
+SET
+ parts 
+-------
+    12
+(1 row)
+
+--- DDL is not allowed (expect: must be owner / permission denied) ---
+ERROR:  must be owner of table customers
+--- TRUNCATE is not allowed (expect: permission denied) ---
+ERROR:  permission denied for table customers
+RESET
+
+=== ROW LEVEL SECURITY on job_orders (role shop_app) ===
+--- As a MECHANIC (user id 2): can read all, can only change own job orders ---
+SET
+ set_config | set_config 
+------------+------------
+ 2          | mechanic
+(1 row)
+
+ visible_job_orders 
+--------------------
+                 22
+(1 row)
+
+BEGIN
+Update a job order of mechanic 2 (expect: UPDATE n, n > 0)
+UPDATE 11
+Update a job order of someone else (expect: UPDATE 0, the policy hides those rows)
+UPDATE 0
+Delete a job order as mechanic (expect: DELETE 0, only admin may delete)
+DELETE 0
+ROLLBACK
+--- As an ADMIN: can change any job order ---
+ set_config | set_config 
+------------+------------
+ 1          | admin
+(1 row)
+
+BEGIN
+UPDATE 22
+ROLLBACK
+RESET
